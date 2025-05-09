@@ -1,4 +1,4 @@
-name: Replicate Release to Public Repo
+name: Replicate Release to Public Repov
 
 on:
   release:
