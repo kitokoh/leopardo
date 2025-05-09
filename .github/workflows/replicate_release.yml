@@ -1,0 +1,75 @@
+name: Replicate Release to Public Repo
+
+on:
+  release:
+    types: [published, edited]
+
+jobs:
+  replicate-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download release assets and metadata
+        uses: actions/github-script@v7
+        id: fetch_release
+        with:
+          script: |
+            const release = context.payload.release;
+            const assets = release.assets.map(asset => ({
+              name: asset.name,
+              url: asset.url
+            }));
+            return {
+              tag_name: release.tag_name,
+              name: release.name,
+              body: release.body,
+              draft: release.draft,
+              prerelease: release.prerelease,
+              assets: JSON.stringify(assets)
+            };
+
+      - name: Create release in public repo
+        uses: actions/github-script@v7
+        id: create_release
+        with:
+          github-token: ${{ secrets.TARGET_REPO_TOKEN }}
+          script: |
+            const releaseInfo = {
+              tag_name: `${{ steps.fetch_release.outputs.tag_name }}`,
+              name: `${{ steps.fetch_release.outputs.name }}`,
+              body: `${{ steps.fetch_release.outputs.body }}`,
+              draft: ${{ steps.fetch_release.outputs.draft == 'true' }},
+              prerelease: ${{ steps.fetch_release.outputs.prerelease == 'true' }}
+            };
+
+            const response = await github.rest.repos.createRelease({
+              owner: "kitokoh",
+              repo: "leopardo",
+              tag_name: releaseInfo.tag_name,
+              name: releaseInfo.name,
+              body: releaseInfo.body,
+              draft: releaseInfo.draft,
+              prerelease: releaseInfo.prerelease
+            });
+
+            return { upload_url: response.data.upload_url };
+
+      - name: Download each asset from private release
+        run: |
+          mkdir assets
+          echo '${{ steps.fetch_release.outputs.assets }}' | jq -c '.[]' | while read -r asset; do
+            name=$(echo "$asset" | jq -r '.name')
+            url=$(echo "$asset" | jq -r '.url')
+            echo "Downloading $name ..."
+            curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                 -H "Accept: application/octet-stream" \
+                 "$url" --output "assets/$name"
+          done
+
+      - name: Upload assets to public release
+        uses: softprops/action-gh-release@v1
+        with:
+          token: ${{ secrets.TARGET_REPO_TOKEN }}
+          repository: TonNomUtilisateur/NomDepotPublic
+          tag_name: ${{ steps.fetch_release.outputs.tag_name }}
+          files: assets/*
